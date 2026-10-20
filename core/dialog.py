@@ -39,9 +39,9 @@ _RULES = {
         "На вопрос «есть ли / сколько стоит?» отвечай: «Сейчас уточню наличие и точную стоимость у кладовщика на складе» "
         "и продолжай сбор параметров. "
         "Если марка не в списке — вежливо откажи и предложи уточнить у менеджера или записать в лист ожидания. "
-        "При запросе человека («менеджер», «оператор») ставь needs_handoff=true. "
         "Ответ возвращай СТРОГО в формате валидного JSON-объекта контракта AgentResult: "
-        '{{"context_version": 1, "reply_text": "...", "intent": "parts_query", "vehicle_updates": [], "parts": [], "needs_handoff": false, "reason": null}}'
+        '{{"context_version": 1, "reply_text": "...", "intent": "parts_query", "vehicle_updates": [], "parts": [], "needs_handoff": false, "reason": null}}. '
+        "ВАЖНО: если needs_handoff=true, поле reason ОБЯЗАТЕЛЬНО должно быть строкой с причиной передачи (не null!)."
     ),
     "kk": (
         "Сіз «Шрот на 47» автобөлшектер авторазборының консультантысыз (Қарағанды қ., Лиза Чайкина көш., 157/1). "
@@ -114,6 +114,8 @@ class DialogEngine:
             try:
                 raw_json = self._call_llm_raw(messages)
                 data = json.loads(raw_json)
+                if data.get("needs_handoff") and not data.get("reason"):
+                    data["reason"] = "warehouse_manager_check"
                 return AgentResult.model_validate(data)
             except (json.JSONDecodeError, ValidationError) as exc:
                 last_error = f"schema_validation_error: {exc}"

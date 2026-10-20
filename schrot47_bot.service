@@ -1,0 +1,16 @@
+[Unit]
+Description=Schrot47 WhatsApp AI Bot (Evolution API v2)
+After=network.target
+
+[Service]
+Type=simple
+User=gan
+Group=gan
+WorkingDirectory=/home/gan/1/schrot47_bot
+EnvironmentFile=/home/gan/1/schrot47_bot/.env
+ExecStart=/home/gan/1/schrot47_bot/venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
