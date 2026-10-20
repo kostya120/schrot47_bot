@@ -1,108 +1,129 @@
 # schrot47_bot 🤖
+### WhatsApp AI-консультант по автозапчастям («Шрот на 47 Караганда») через Evolution API v2
 
-Telegram-бот для ответа клиентам на базе **ChatGPT (GPT-4o)** — работает как живой менеджер в WhatsApp.
+Адаптированная версия бота на базе стандартов архитектуры и бизнес-правил **SHROT47**:
+- **Транспорт**: Evolution API v2 (вебхуки `messages.upsert`, отправка через `/message/sendText/{instance}`)
+- **LLM-движок**: OpenAI (GPT-4o / GPT-4o-mini) с принудительной валидацией Pydantic v2 контракта `AgentResult`
+- **Бизнес-правила**:
+  - Специализация исключительно на легковых немецких автомобилях (**Audi, Volkswagen, Mercedes-Benz, BMW, Opel, SEAT**)
+  - Запрет галлюцинаций цен и наличия: фактическое наличие и точная цена проверяются кладовщиком на складе (Караганда, ул. Лизы Чайкиной, 157/1)
+  - Определение стороны детали строго по ходу движения автомобиля (лево = сторона водителя, право = сторона пассажира)
+  - Темп диалога: не более 1–2 уточняющих вопросов в одном сообщении
+  - Изоляция сессий клиентов и персистентность контекста в SQLite
+  - Автоматическая и ручная эскалация на менеджера (Human Handoff) с уведомлением группы склада WhatsApp (`120363427990129017@g.us`)
+  - Замолкание бота при перехвате диалога живым менеджером (`human_mode=True` или `fromMe=True`)
 
-## Возможности
+---
 
-- 💬 **AI-ответы** на базе GPT-4o — отвечает как живой менеджер
-- 🧠 **Помнит историю** переписки каждого клиента
-- ⌨️ **«Печатает...»** — typing indicator как в WhatsApp
-- 📋 **Кнопки-меню** — Услуги, Менеджер, FAQ
-- 🌐 **Мультиязычный** — автоматически отвечает на языке клиента
-- 🔄 Команда `/clear` для сброса истории
+## Архитектура системы
+
+```
+   ┌─────────────────────────────────────────────────────────────────┐
+   │                       WhatsApp (Клиент)                         │
+   └──────────────────────────────┬──────────────────────────────────┘
+                                  │ Входящее сообщение
+                                  ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │                    Evolution API v2 (:8080)                     │
+   └──────────────────────────────┬──────────────────────────────────┘
+                                  │ POST /webhook/evolution
+                                  ▼
+   ┌─────────────────────────────────────────────────────────────────┐
+   │                     schrot47_bot (FastAPI)                      │
+   │                                                                 │
+   │ 1. Проверка API-ключа вебхука (apikey / X-Webhook-Secret)        │
+   │ 2. Дедупликация сообщений (идемпотентность по message_id)        │
+   │ 3. Фильтрация fromMe=True (активация human_mode) и групп        │
+   │ 4. Проверка human_mode (тишина бота при активном операторе)      │
+   │ 5. Фильтрация непрофильных марок (ВАЗ, Азия) -> вежливый отказ  │
+   │ 6. Определение стороны детали (parts_orientation)               │
+   │ 7. Диалоговый движок (OpenAI GPT-4o + AgentResult + 3x retry)    │
+   │ 8. SafetyManager (fail-closed рубильники kill_switch, outbound) │
+   │ 9. Отправка ответа клиенту + уведомление группы склада          │
+   └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Безопасность и рубильники (Fail-Closed)
+
+По умолчанию при старте включен безопасный режим:
+- `PRODUCTION_ENABLED=false`
+- `OUTBOUND_ENABLED=false`
+- `KILL_SWITCH=true`
+
+В этом режиме входящие вебхуки валидируются, обрабатываются диалоговым движком, но **реальные исходящие сообщения в WhatsApp не отправляются** (логируются в режиме dry-run).
+
+Для включения исходящих сообщений требуется санкционированное действие владельца с флагом `confirm=True`:
+```bash
+curl -X POST http://localhost:8000/v1/safety/toggle \
+  -H "Content-Type: application/json" \
+  -d '{"flag": "outbound_enabled", "value": true, "actor": "owner", "is_owner": true, "confirm": true}'
+```
+
+---
 
 ## Быстрый старт
 
-### 1. Клонируй репозиторий
-```bash
-git clone https://github.com/kostya120/schrot47_bot.git
-cd schrot47_bot
-```
-
-### 2. Создай виртуальное окружение
+### 1. Установка зависимостей
 ```bash
 python3 -m venv venv
-source venv/bin/activate  # Linux/Mac
-# или: venv\Scripts\activate  # Windows
-```
-
-### 3. Установи зависимости
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Настрой переменные окружения
+### 2. Настройка переменных окружения
 ```bash
 cp .env.example .env
-nano .env  # вставь свои ключи
+nano .env
 ```
 
-Содержимое `.env`:
-```
-TELEGRAM_TOKEN=твой_токен_от_@BotFather
-OPENAI_API_KEY=sk-...твой_ключ...
-```
+Обязательные переменные:
+- `OPENAI_API_KEY`: ключ OpenAI API
+- `EVOLUTION_BASE_URL`: URL инстанса Evolution API (по умолчанию `http://localhost:8080`)
+- `EVOLUTION_API_KEY`: API-ключ инстанса Evolution API
+- `EVOLUTION_INSTANCE`: имя инстанса (например, `shrot47`)
+- `WEBHOOK_SECRET`: токен заголовка `apikey` для защиты входящего вебхука
 
-### 5. Запусти бота
+### 3. Запуск тестов и линтеров
 ```bash
-bash run.sh
+# Запуск полного набора unit и integration тестов
+pytest -v tests/
+
+# Проверка линтерами
+flake8 app.py core/ tests/
+ruff check app.py core/ tests/
 ```
 
-## Где получить ключи
-
-| Ключ | Где получить |
-|---|---|
-| `TELEGRAM_TOKEN` | [@BotFather](https://t.me/BotFather) в Telegram |
-| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-
-## Команды бота
-
-| Команда | Описание |
-|---|---|
-| `/start` | Главное меню с кнопками |
-| `/help` | Справка |
-| `/clear` | Очистить историю разговора |
-
-## Настройка системного промпта
-
-Открой [bot.py](bot.py) и измени переменную `SYSTEM_PROMPT` — настрой бота под свой бизнес:
-
-```python
-SYSTEM_PROMPT = """Ты вежливый помощник компании "Ромашка".
-Мы продаём цветы. Режим работы: 9:00-21:00.
-Отвечай кратко и по делу...
-"""
-```
-
-## Запуск 24/7 на сервере (systemd)
-
+### 4. Запуск сервиса
 ```bash
-sudo nano /etc/systemd/system/schrot47_bot.service
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-```ini
-[Unit]
-Description=Schrot47 Telegram Bot
-After=network.target
+---
 
-[Service]
-Type=simple
-WorkingDirectory=/path/to/schrot47_bot
-EnvironmentFile=/path/to/schrot47_bot/.env
-ExecStart=/path/to/schrot47_bot/venv/bin/python bot.py
-Restart=always
+## API Эндпоинты
 
-[Install]
-WantedBy=multi-user.target
-```
+| Метод | Путь | Описание |
+|---|---|---|
+| `GET` | `/` | Информация о сервисе и статус рубильников безопасности |
+| `GET` | `/health` | Healthcheck (статус базы данных, LLM и безопасности) |
+| `POST` | `/webhook/evolution` | Входящий вебхук Evolution API v2 (`messages.upsert`) |
+| `POST` | `/webhook/whatsapp` | Алиас вебхука |
+| `POST` | `/v1/events/whatsapp` | Внутренний сервисный приём событий WhatsApp |
+| `GET` | `/v1/sessions/{phone}` | Инспекция контекста, истории и статуса human_mode клиента (read-only) |
+| `POST` | `/v1/safety/toggle` | Переключение рубильников безопасности (только с правами владельца) |
 
-```bash
-sudo systemctl enable schrot47_bot
-sudo systemctl start schrot47_bot
-```
+---
 
-## Технологии
+## Тестирование и верификация
 
-- [python-telegram-bot](https://python-telegram-bot.org/) v22.8
-- [OpenAI Python SDK](https://github.com/openai/openai-python) v3.x
-- GPT-4o
+Тестовый набор содержит 28 автоматизированных тестов в директории `tests/`:
+1. `test_webhook_contract.py` — проверка вебхуков, фильтрации `fromMe`, групп и дедупликации.
+2. `test_dialog_engine.py` — проверка Pydantic-контракта `AgentResult`, системного промпта, retry и handoff при сбоях LLM.
+3. `test_client_isolation.py` — проверка изоляции данных между разными клиентами.
+4. `test_persistence.py` — проверка сохранения и восстановления сессий в SQLite после рестарта.
+5. `test_parts_and_prices.py` — проверка определения сторон деталей, OEM-валидации и защиты от галлюцинаций цен (`is_actual_stock_price=False`).
+6. `test_handoff.py` — проверка эскалации на менеджера, замолкания бота и уведомления группы склада.
+7. `test_safety_boundaries.py` — проверка fail-closed рубильников, санитизации логов и ограничения длины текста.
+8. `test_api_endpoints.py` — сквозные тесты FastAPI эндпоинтов.
