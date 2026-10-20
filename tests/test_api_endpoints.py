@@ -24,13 +24,14 @@ def test_root_and_health():
 def test_webhook_endpoint_via_fastapi():
     client = TestClient(app)
     unique_id = f"API_TEST_MSG_{uuid.uuid4().hex[:8]}"
+    unique_phone = f"7705{uuid.uuid4().int % 10000000:07d}"
 
     payload = {
         "event": "messages.upsert",
         "instance": "shrot47",
         "data": {
             "key": {
-                "remoteJid": "77053334455@s.whatsapp.net",
+                "remoteJid": f"{unique_phone}@s.whatsapp.net",
                 "fromMe": False,
                 "id": unique_id,
             },
@@ -48,10 +49,10 @@ def test_webhook_endpoint_via_fastapi():
     assert data["status"] == "handoff_initiated"
 
     # Проверка получения сессии через API
-    res_s = client.get("/v1/sessions/77053334455")
+    res_s = client.get(f"/v1/sessions/{unique_phone}")
     assert res_s.status_code == 200
     s_data = res_s.json()
-    assert s_data["phone"] == "77053334455"
+    assert s_data["phone"] == unique_phone
     assert s_data["human_mode"] is True
     assert s_data["history_count"] >= 1
 
