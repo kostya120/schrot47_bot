@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import dataclass
 
 import httpx
@@ -37,13 +38,14 @@ class EvolutionClient:
         instance: str = "shrot47",
         safety: SafetyManager | None = None,
         timeout: float = 10.0,
+        max_history: int = 100,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.instance = instance
         self.safety = safety or SafetyManager()
         self.timeout = timeout
-        self.outbox_history: list[OutboundMessage] = []
+        self.outbox_history: deque[OutboundMessage] = deque(maxlen=max_history)
 
     def _headers(self) -> dict[str, str]:
         return {

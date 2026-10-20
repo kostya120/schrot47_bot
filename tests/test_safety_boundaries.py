@@ -71,3 +71,18 @@ def test_bound_text_protection():
     huge_text = "A" * 5000
     bounded = bound_text(huge_text, max_length=1500)
     assert len(bounded) == 1500
+
+
+def test_bounded_outbox_history(safety_mgr):
+    client = EvolutionClient(
+        base_url="http://localhost:8080",
+        api_key="secret",
+        instance="shrot47",
+        safety=safety_mgr,
+        max_history=5,
+    )
+    for i in range(10):
+        client.send_text("77011234567@s.whatsapp.net", f"Message {i}")
+
+    assert len(client.outbox_history) == 5
+    assert client.outbox_history[-1].text == "Message 9"
