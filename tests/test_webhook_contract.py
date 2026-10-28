@@ -69,10 +69,10 @@ def test_webhook_authorized_and_processed(session_mgr, evo_client, safety_mgr):
 
 def test_webhook_from_me_activates_human_mode(session_mgr, evo_client, safety_mgr):
     dialog = MagicMock()
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="secret123")
 
     payload = _sample_payload(from_me=True, remote_jid="77015555555@s.whatsapp.net")
-    res = service.process_webhook(payload)
+    res = service.process_webhook(payload, apikey_header="secret123")
 
     assert res["status"] == "ignored_from_me"
     assert res["human_mode_activated"] is True
@@ -81,10 +81,10 @@ def test_webhook_from_me_activates_human_mode(session_mgr, evo_client, safety_mg
 
 def test_webhook_group_ignored(session_mgr, evo_client, safety_mgr):
     dialog = MagicMock()
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="secret123")
 
     payload = _sample_payload(remote_jid="120363427990129017@g.us")
-    res = service.process_webhook(payload)
+    res = service.process_webhook(payload, apikey_header="secret123")
 
     assert res["status"] == "ignored_group_message"
     dialog.run_turn.assert_not_called()
@@ -97,18 +97,26 @@ def test_webhook_deduplication(session_mgr, evo_client, safety_mgr):
         reply_text="Ответ на первое сообщение",
         needs_handoff=False,
     )
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="secret123")
 
     payload = _sample_payload(msg_id="UNIQUE_ID_999")
 
     # Первая доставка сообщения
-    res1 = service.process_webhook(payload)
+    res1 = service.process_webhook(payload, apikey_header="secret123")
     assert res1["status"] == "success"
 
     # Повторная доставка того же сообщения (retry Evolution API)
-    res2 = service.process_webhook(payload)
+    res2 = service.process_webhook(payload, apikey_header="secret123")
     assert res2["status"] == "duplicate_ignored"
     assert res2["message_id"] == "UNIQUE_ID_999"
 
     # Диалоговый движок вызывался ровно 1 раз
     assert dialog.run_turn.call_count == 1
+
+
+def test_webhook_missing_secret_is_denied(session_mgr, evo_client, safety_mgr):
+    """No secret configured must be a hard failure, never a dev-mode bypass."""
+    service = BotService(session_mgr, MagicMock(), evo_client, safety_mgr, webhook_secret="")
+    res = service.process_webhook(_sample_payload(msg_id="MISSING_SECRET"))
+    assert res["status"] == "unauthorized"
+    assert res["code"] == 401
