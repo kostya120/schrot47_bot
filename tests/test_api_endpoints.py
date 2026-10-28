@@ -96,3 +96,10 @@ def test_safety_toggle_api(monkeypatch):
     )
     assert res_reset.status_code == 200
     assert res_reset.json()["safety"]["production_enabled"] is False
+
+
+def test_api_webhook_missing_secret_returns_401(monkeypatch):
+    monkeypatch.setattr(bot_service, "webhook_secret", "")
+    client = TestClient(app)
+    res = client.post("/webhook/evolution", json={"event": "messages.upsert"})
+    assert res.status_code == 401
