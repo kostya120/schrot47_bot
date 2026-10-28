@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 import os
-from hmac import compare_digest
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
