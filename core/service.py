@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+from hmac import compare_digest
 from typing import Any
 
 from .brands import check_brand_policy
@@ -47,9 +48,12 @@ class BotService:
 
     def verify_webhook_auth(self, apikey_header: str | None = None) -> bool:
         """Проверка ключа авторизации вебхука Evolution API."""
-        if not self.webhook_secret:
-            return True  # Секрет не задан — режим разработки
-        return apikey_header == self.webhook_secret
+        # A missing secret must never turn a public webhook into an open endpoint.
+        return bool(
+            self.webhook_secret
+            and apikey_header
+            and compare_digest(self.webhook_secret, apikey_header)
+        )
 
     def extract_normalized_message(self, payload_dict: dict[str, Any]) -> NormalizedMessage | None:
         """Парсинг и извлечение нормализованного сообщения из Evolution API payload."""

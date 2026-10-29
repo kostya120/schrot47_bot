@@ -30,10 +30,10 @@ def _payload(phone, text, msg_id="MSG_H_1"):
 
 def test_handoff_by_keyword(session_mgr, evo_client, safety_mgr):
     dialog = MagicMock()
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="test-secret")
 
     phone = "77771234567"
-    res = service.process_webhook(_payload(phone, "Пожалуйста, позови человека, сложный вопрос"))
+    res = service.process_webhook(_payload(phone, "Пожалуйста, позови человека, сложный вопрос"), apikey_header="test-secret")
 
     assert res["status"] == "handoff_initiated"
     assert session_mgr.is_human_mode(phone) is True
@@ -51,12 +51,12 @@ def test_handoff_by_keyword(session_mgr, evo_client, safety_mgr):
 
 def test_bot_silence_when_human_mode_active(session_mgr, evo_client, safety_mgr):
     dialog = MagicMock()
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="test-secret")
 
     phone = "77771234567"
     session_mgr.set_human_mode(phone, True)
 
-    res = service.process_webhook(_payload(phone, "Алло, вы тут?", msg_id="MSG_H_2"))
+    res = service.process_webhook(_payload(phone, "Алло, вы тут?", msg_id="MSG_H_2"), apikey_header="test-secret")
     assert res["status"] == "human_mode_active"
     assert res["reply_sent"] is False
     dialog.run_turn.assert_not_called()
@@ -69,10 +69,10 @@ def test_bot_silence_when_human_mode_active(session_mgr, evo_client, safety_mgr)
 
 def test_non_profile_brand_rejection(session_mgr, evo_client, safety_mgr):
     dialog = MagicMock()
-    service = BotService(session_mgr, dialog, evo_client, safety_mgr)
+    service = BotService(session_mgr, dialog, evo_client, safety_mgr, webhook_secret="test-secret")
 
     phone = "77017778899"
-    res = service.process_webhook(_payload(phone, "Есть фара на Лада Приора?"))
+    res = service.process_webhook(_payload(phone, "Есть фара на Лада Приора?"), apikey_header="test-secret")
 
     assert res["status"] == "non_profile_brand_handled"
     # LLM не тратит токены на непрофильные авто

@@ -6,9 +6,10 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
+from hmac import compare_digest
 
-from fastapi import FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
 
 from core.dialog import DialogEngine
 from core.evolution_client import EvolutionClient
@@ -76,8 +77,6 @@ class SafetyToggleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     flag: str
     value: bool
-    actor: str = Field(min_length=1)
-    is_owner: bool = False
     confirm: bool = False
 
 
@@ -125,8 +124,15 @@ async def evolution_webhook(
     return result
 
 
+def require_admin(x_admin_key: str | None = Header(None, alias="x-admin-key")) -> None:
+    """Validate a dedicated administrative secret; caller-supplied role flags are not trusted."""
+    expected = os.getenv("ADMIN_API_KEY", "")
+    if not expected or not x_admin_key or not compare_digest(expected, x_admin_key):
+        raise HTTPException(status_code=403, detail="Administrative access denied")
+
+
 @app.get("/v1/sessions/{phone}")
-def get_session_info(phone: str):
+def get_session_info(phone: str, _admin: None = Depends(require_admin)):
     """Инспекция сессии и истории сообщений клиента (read-only)."""
     session = session_manager.get_or_create_session(phone)
     history = session_manager.get_history(phone)
@@ -144,14 +150,14 @@ def get_session_info(phone: str):
 
 
 @app.post("/v1/safety/toggle")
-def toggle_safety(req: SafetyToggleRequest):
+def toggle_safety(req: SafetyToggleRequest, _admin: None = Depends(require_admin)):
     """Безопасное переключение рубильника (только для владельца)."""
     try:
         updated = safety_manager.toggle(
             flag=req.flag,
             value=req.value,
-            actor=req.actor,
-            is_owner=req.is_owner,
+            actor="authenticated_admin",
+            is_owner=True,
             confirm=req.confirm,
         )
         return {"status": "success", "safety": updated}
